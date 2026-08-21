@@ -124,6 +124,27 @@
   .on .ago{font-family:var(--mono);font-size:10px;color:var(--live);margin-top:4px}
   .on .body{min-width:0;flex:1}
 
+  /* diagnostic banner */
+  .diag{border-radius:12px;padding:14px 16px;margin-bottom:18px;font-size:13px;line-height:1.7}
+  .diag.bad{background:rgba(226,75,90,.1);border:1px solid rgba(226,75,90,.4)}
+  .diag.warn{background:rgba(229,115,75,.1);border:1px solid rgba(229,115,75,.4)}
+  .diag b{color:var(--gold)}
+  .diag code{font-family:var(--mono);background:#0b1220;padding:2px 6px;border-radius:5px;font-size:12px}
+
+  /* drill-down drawer */
+  .drawer{position:fixed;inset:0;z-index:50;background:rgba(6,10,18,.72);
+    backdrop-filter:blur(4px);display:flex;justify-content:flex-end}
+  .drawer .sheet{width:min(760px,100%);background:var(--bg);border-left:1px solid var(--line);
+    display:flex;flex-direction:column;animation:slide .22s ease}
+  @keyframes slide{from{transform:translateX(30px);opacity:.4}to{transform:none;opacity:1}}
+  .sheethead{display:flex;align-items:flex-start;gap:12px;padding:18px 22px;border-bottom:1px solid var(--line)}
+  .sheetbody{padding:18px 22px 40px;overflow:auto}
+  .sheetbody .kpis{grid-template-columns:repeat(4,1fr);margin-bottom:16px}
+  .sheetbody .kpi .v{font-size:22px}
+  .clickable{cursor:pointer}
+  .clickable:hover td:first-child{color:var(--gold);text-decoration:underline}
+  @media(max-width:700px){.sheetbody .kpis{grid-template-columns:repeat(2,1fr)}}
+
   .feed{max-height:360px;overflow:auto}
   .feed .r{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--line);font-size:13px;align-items:baseline}
   .feed .r .d{width:7px;height:7px;border-radius:50%;background:var(--navy);flex:none;align-self:center}
@@ -180,6 +201,8 @@
       <button class="tabbtn" id="refresh">รีเฟรช</button>
       <span class="stamp" id="stamp"></span>
     </div>
+
+    <div id="diag" class="diag hide"></div>
 
     <!-- ===== DASHBOARD VIEW ===== -->
     <div id="view-dash">
@@ -249,6 +272,40 @@
   </div>
 </div>
 
+<!-- ===== DRILL-DOWN ===== -->
+<div id="drawer" class="drawer hide">
+  <div class="sheet">
+    <div class="sheethead">
+      <div style="min-width:0">
+        <div class="brandmark">รายละเอียดผู้ใช้</div>
+        <h2 id="dTitle" style="margin:4px 0 0;font-size:19px"></h2>
+        <div id="dSub" class="stamp" style="margin-top:4px"></div>
+      </div>
+      <button class="btn g" id="dClose" style="margin-left:auto;flex:none">ปิด</button>
+    </div>
+    <div class="sheetbody">
+      <div class="kpis">
+        <div class="kpi"><div class="l">เข้าใช้ (ครั้ง)</div><div class="v gold" id="dSess">–</div></div>
+        <div class="kpi"><div class="l">เปิดหน้า</div><div class="v" id="dViews">–</div></div>
+        <div class="kpi"><div class="l">เวลารวม (นาที)</div><div class="v" id="dMins">–</div></div>
+        <div class="kpi"><div class="l">วันที่ใช้งาน</div><div class="v" id="dDays">–</div></div>
+      </div>
+      <div class="panel" style="margin-bottom:14px">
+        <h3>ใช้หน้าไหน · นานแค่ไหน</h3>
+        <div class="scrollx" id="dPages"></div>
+      </div>
+      <div class="panel" style="margin-bottom:14px">
+        <h3>แต่ละครั้งที่เข้าใช้ <span class="t">เริ่ม–จบ · ระยะเวลา</span></h3>
+        <div class="scrollx" id="dSessions"></div>
+      </div>
+      <div class="panel">
+        <h3>ไทม์ไลน์ <span class="t">ทำอะไร เมื่อไหร่</span></h3>
+        <div id="dTimeline"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 const HUB_URL = 'https://rmunaewdmlnsiwogmozq.supabase.co';   // masaru-champ
 const HUB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJtdW5hZXdkbWxuc2l3b2dtb3pxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI3MTg5NDUsImV4cCI6MjA5ODI5NDk0NX0.sNYPKfXf0rNt9JgmyRGH7yY4C1NLpmYngHcswEsXHNA';
@@ -274,9 +331,48 @@ async function boot(){
   if(!session){ show('auth'); return; }
   show('app');
   $('whoami').textContent = session.user.email || 'admin';
+  await runDiag();
   await loadSystems();
   await loadAll();
   startLive();
+}
+
+// ---------- ตัวตรวจปัญหา ----------
+async function runDiag(){
+  const box=$('diag');
+  try{
+    const { data, error } = await sb.rpc('hub_whoami');
+    if(error){
+      box.className='diag bad'; box.classList.remove('hide');
+      box.innerHTML='<b>ยังไม่ได้รัน SQL แพตช์</b><br>กรุณารัน <code>hub_detail_patch.sql</code> ใน SQL Editor ของ masaru-champ ก่อน';
+      return;
+    }
+    const d=(data&&data[0])||{};
+    if(!d.is_admin){
+      box.className='diag bad'; box.classList.remove('hide');
+      box.innerHTML=`<b>บัญชีนี้ยังไม่ใช่แอดมิน</b> — ข้อมูลเลยขึ้นเป็น 0 ทั้งหมด<br>
+        อีเมลที่ฐานข้อมูลเห็น: <code>${esc(d.jwt_email||'(ไม่มี)')}</code><br>
+        แก้โดยรันคำสั่งนี้ใน SQL Editor แล้วรีเฟรชหน้านี้:<br>
+        <code>create or replace function public.is_hub_admin() returns boolean language sql stable as $$ select (auth.jwt() ->> 'email') = '${esc(d.jwt_email||'')}'; $$;</code>`;
+      return;
+    }
+    if(Number(d.systems_count||0)===0){
+      box.className='diag bad'; box.classList.remove('hide');
+      box.innerHTML='<b>ยังไม่มีระบบในทะเบียน</b> — รัน <code>hub_setup.sql</code> ส่วน insert into systems ให้ครบก่อน';
+      return;
+    }
+    if(Number(d.events_count||0)===0){
+      box.className='diag warn'; box.classList.remove('hide');
+      box.innerHTML=`<b>Hub พร้อมแล้ว แต่ยังไม่มีข้อมูลส่งเข้ามาเลย</b> (0 events)<br>
+        แปลว่าระบบปลายทางยังไม่ได้ฝัง tracker — ตรวจว่า <code>masaru-track.js</code> ขึ้น repo แล้ว
+        และหน้าเว็บมี <code>window.MASARU_TRACK</code> อยู่ก่อน <code>&lt;/body&gt;</code>`;
+      return;
+    }
+    box.classList.add('hide');
+  }catch(e){
+    box.className='diag bad'; box.classList.remove('hide');
+    box.innerHTML='<b>เชื่อมต่อฐานข้อมูลไม่ได้</b> — ตรวจ HUB_URL / HUB_KEY';
+  }
 }
 function show(v){ $('auth').classList.toggle('hide', v!=='auth'); $('app').classList.toggle('hide', v!=='app'); }
 
@@ -355,7 +451,7 @@ function renderOnline(rows){
     const who=r.email||'ไม่ระบุตัว';
     const ini=(who[0]||'?').toUpperCase();
     const dev=r.device==='mobile'?'มือถือ':(r.device==='tablet'?'แท็บเล็ต':'คอม');
-    return `<div class="on">
+    return `<div class="on clickable" data-email="${esc(r.email||'')}">
       <div class="av">${esc(ini)}</div>
       <div class="body">
         <div class="who">${esc(who)}</div>
@@ -364,6 +460,9 @@ function renderOnline(rows){
         <div class="ago">● อยู่หน้านี้ ${Math.round(+r.on_page_minutes||0)} นาที · ${dev} · เห็นล่าสุด ${r.seconds_ago}s</div>
       </div></div>`;
   }).join('')+'</div>';
+  $('onlineWrap').querySelectorAll('.on.clickable').forEach(el=>{
+    el.onclick=()=>{ const em=el.dataset.email; if(em) openUser(em); };
+  });
 }
 
 function startLive(){
@@ -425,7 +524,7 @@ function renderKPI(rows){
 function renderUsers(rows){
   if(!rows.length){ $('userWrap').innerHTML='<div class="empty">ยังไม่มีข้อมูลในช่วงนี้</div>'; return; }
   let h='<table><thead><tr><th>ผู้ใช้</th><th>ฝ่าย</th><th class="n">ระบบ</th><th class="n">เปิด</th><th class="n">นาที</th><th>ใช้บ่อยสุด</th><th>ล่าสุด</th></tr></thead><tbody>';
-  rows.forEach(r=>{ h+=`<tr>
+  rows.forEach(r=>{ h+=`<tr class="clickable" data-email="${esc(r.email||'')}">
     <td>${esc(r.email||'ไม่ระบุตัว')}</td>
     <td><span class="pill">${esc(r.role||'—')}</span></td>
     <td class="n">${num(r.systems)}</td>
@@ -434,6 +533,9 @@ function renderUsers(rows){
     <td>${r.top_app?`<span class="pill app">${esc(r.top_app)}</span>`:'—'}</td>
     <td class="stamp">${fmt(r.last_seen)}</td></tr>`; });
   $('userWrap').innerHTML=h+'</tbody></table>';
+  $('userWrap').querySelectorAll('tr.clickable').forEach(tr=>{
+    tr.onclick=()=>{ const em=tr.dataset.email; if(em) openUser(em); };
+  });
 }
 function renderApps(rows){
   if(!rows.length){ $('appWrap').innerHTML='<div class="empty">—</div>'; return; }
@@ -469,6 +571,66 @@ function renderFeed(rows){
       <div><span class="pill">${esc(r.system)}</span> <b>${esc(r.email||'ไม่ระบุ')}</b> · ${what}</div>
       <div class="tm">${fmt(r.ts)}</div></div>`;
   }).join('');
+}
+
+// ================= DRILL-DOWN รายบุคคล =================
+$('dClose').onclick=()=>$('drawer').classList.add('hide');
+$('drawer').onclick=(e)=>{ if(e.target.id==='drawer') $('drawer').classList.add('hide'); };
+document.addEventListener('keydown',e=>{ if(e.key==='Escape') $('drawer').classList.add('hide'); });
+
+async function openUser(email){
+  const { from, to } = bounds();
+  $('drawer').classList.remove('hide');
+  $('dTitle').textContent=email;
+  $('dSub').textContent='ช่วง '+$('range').selectedOptions[0].text;
+  ['dPages','dSessions','dTimeline'].forEach(x=>$(x).innerHTML='<div class="empty">กำลังโหลด…</div>');
+  try{
+    const [pg,ss,tl,dy] = await Promise.all([
+      sb.rpc('hub_user_pages',{p_email:email,p_from:from,p_to:to}),
+      sb.rpc('hub_user_sessions',{p_email:email,p_from:from,p_to:to}),
+      sb.rpc('hub_user_timeline',{p_email:email,p_from:from,p_to:to,p_limit:300}),
+      sb.rpc('hub_user_days',{p_email:email,p_from:from,p_to:to})
+    ]);
+    if(pg.error) throw pg.error;
+    const pages=pg.data||[], sess=ss.data||[], tline=tl.data||[], days=dy.data||[];
+
+    $('dSess').textContent=num(sess.length);
+    $('dViews').textContent=num(pages.reduce((s,r)=>s+ +r.visits||0,0));
+    $('dMins').textContent=num(Math.round(pages.reduce((s,r)=>s+ +r.minutes||0,0)));
+    $('dDays').textContent=num(days.length);
+
+    $('dPages').innerHTML = pages.length
+      ? '<table><thead><tr><th>ระบบ</th><th>หน้า</th><th class="n">เข้ากี่ครั้ง</th><th class="n">นาที</th><th>ล่าสุด</th></tr></thead><tbody>'
+        + pages.map(r=>`<tr><td><span class="pill">${esc(r.system)}</span></td>
+            <td><span class="pill app">${esc(r.app||'—')}</span></td>
+            <td class="n">${num(r.visits)}</td><td class="n">${(+r.minutes||0).toFixed(1)}</td>
+            <td class="stamp">${fmt(r.last_visit)}</td></tr>`).join('')+'</tbody></table>'
+      : '<div class="empty">—</div>';
+
+    $('dSessions').innerHTML = sess.length
+      ? '<table><thead><tr><th>เริ่ม</th><th>จบ</th><th class="n">นาที</th><th class="n">หน้า</th><th>อุปกรณ์</th><th>เปิดหน้าอะไรบ้าง</th></tr></thead><tbody>'
+        + sess.map(r=>`<tr><td class="stamp">${fmt(r.started)}</td><td class="stamp">${fmt(r.ended)}</td>
+            <td class="n">${(+r.minutes||0).toFixed(1)}</td><td class="n">${num(r.pages)}</td>
+            <td><span class="pill">${r.device==='mobile'?'มือถือ':(r.device==='tablet'?'แท็บเล็ต':'คอม')}</span></td>
+            <td style="font-size:12px;color:var(--muted)">${esc(r.apps||'—')}</td></tr>`).join('')+'</tbody></table>'
+      : '<div class="empty">—</div>';
+
+    $('dTimeline').innerHTML = tline.length
+      ? tline.map(r=>{
+          let what;
+          if(r.event==='page_view') what=`เปิด <span class="pill app">${esc(r.app)}</span>`;
+          else if(r.event==='action') what=`<b style="color:var(--gold)">${esc((r.detail&&r.detail.action)||'action')}</b> ที่ <span class="pill app">${esc(r.app)}</span>`;
+          else if(r.event==='error') what=`<b style="color:var(--red)">error</b> ${esc((r.detail&&r.detail.msg)||'')}`;
+          else what=`ออกจาก <span class="pill app">${esc(r.app)}</span>`;
+          return `<div class="r ${r.event}"><span class="d"></span>
+            <div><span class="pill">${esc(r.system)}</span> ${what}</div>
+            <div class="tm">${fmt(r.ts)}</div></div>`;
+        }).join('')
+      : '<div class="empty">—</div>';
+  }catch(e){
+    $('dPages').innerHTML='<div class="empty">โหลดไม่ได้ — ตรวจว่ารัน hub_detail_patch.sql แล้ว</div>';
+    $('dSessions').innerHTML=''; $('dTimeline').innerHTML='';
+  }
 }
 
 // ---------- settings ----------

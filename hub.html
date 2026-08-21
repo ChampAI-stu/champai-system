@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MASARU · Telemetry Hub</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+  :root{
+    --bg:#0E1622; --bg2:#141F30; --card:#17233A; --card2:#1D2C48;
+    --line:#26344F; --ink:#E7ECF5; --muted:#8595B0; --dim:#5A6A88;
+    --gold:#E5B45B; --gold-d:#B7791F; --navy:#3A5A8C;
+    --live:#38D39F; --warn:#E5734B; --red:#E24B5A;
+    --mono:'JetBrains Mono',ui-monospace,monospace;
+    --sans:'Sarabun',sans-serif;
+  }
+  @media (prefers-reduced-motion: reduce){ *{animation:none!important;transition:none!important} }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{font-family:var(--sans);background:
+      radial-gradient(1200px 600px at 80% -10%, #1a2740 0%, transparent 60%),
+      var(--bg);color:var(--ink);min-height:100vh}
+  .hide{display:none!important}
+  a{color:inherit;text-decoration:none}
+  ::selection{background:var(--gold);color:#111}
+
+  /* ---------- login ---------- */
+  #auth{min-height:100vh;display:grid;place-items:center;padding:20px}
+  .lbox{width:100%;max-width:380px;background:var(--card);border:1px solid var(--line);
+    border-radius:18px;padding:34px;box-shadow:0 30px 80px rgba(0,0,0,.45)}
+  .brandmark{font-family:var(--mono);font-weight:700;letter-spacing:2px;color:var(--gold);font-size:13px}
+  .lbox h1{margin:6px 0 2px;font-size:22px}
+  .lbox p{margin:0 0 22px;color:var(--muted);font-size:13px}
+  label{display:block;font-size:12px;color:var(--muted);margin:0 0 5px}
+  input,select{width:100%;background:var(--bg2);border:1px solid var(--line);color:var(--ink);
+    border-radius:11px;padding:11px 12px;font-family:inherit;font-size:14px}
+  input:focus,select:focus{outline:2px solid var(--gold);outline-offset:0;border-color:transparent}
+  .fld{margin-bottom:13px}
+  .btn{background:var(--gold);color:#1a1300;border:0;border-radius:11px;padding:11px 16px;
+    font-family:inherit;font-weight:700;cursor:pointer;font-size:14px}
+  .btn:hover{background:#f0c069}
+  .btn.g{background:transparent;color:var(--ink);border:1px solid var(--line);font-weight:600}
+  .btn.g:hover{border-color:var(--gold);color:var(--gold)}
+  .err{color:var(--red);font-size:13px;min-height:18px;margin-top:8px}
+
+  /* ---------- shell ---------- */
+  .top{position:sticky;top:0;z-index:5;background:rgba(14,22,34,.85);backdrop-filter:blur(10px);
+    border-bottom:1px solid var(--line);padding:12px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  .top .logo{font-family:var(--mono);font-weight:700;letter-spacing:1px}
+  .top .logo b{color:var(--gold)}
+  .top .sp{flex:1}
+  .top .meta{font-size:12px;color:var(--muted);font-family:var(--mono)}
+  .wrap{max-width:1240px;margin:0 auto;padding:22px 20px 60px}
+
+  .toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:20px}
+  .toolbar select{width:auto}
+  .toolbar .grow{flex:1}
+  .tabbtn{background:transparent;border:1px solid var(--line);color:var(--muted);border-radius:9px;
+    padding:8px 13px;font-family:inherit;font-size:13px;cursor:pointer}
+  .tabbtn.on{color:var(--gold);border-color:var(--gold);background:rgba(229,180,91,.08)}
+  .stamp{font-family:var(--mono);font-size:11px;color:var(--dim)}
+
+  /* ---------- systems strip (signature) ---------- */
+  .strip{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;margin-bottom:22px}
+  .sys{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 15px;cursor:pointer;
+    position:relative;overflow:hidden;transition:border-color .15s,transform .15s}
+  .sys:hover{border-color:var(--navy);transform:translateY(-2px)}
+  .sys.sel{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold) inset}
+  .sys .bar{position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--navy)}
+  .sys .nm{font-size:13px;font-weight:600;padding-left:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sys .st{display:flex;align-items:center;gap:6px;margin:8px 0 10px;padding-left:6px;font-size:11px;color:var(--muted);font-family:var(--mono)}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--dim);flex:none}
+  .dot.live{background:var(--live);box-shadow:0 0 0 0 rgba(56,211,159,.6);animation:pulse 2s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(56,211,159,.5)}70%{box-shadow:0 0 0 8px rgba(56,211,159,0)}100%{box-shadow:0 0 0 0 rgba(56,211,159,0)}}
+  .sys .fig{display:flex;gap:14px;padding-left:6px;font-family:var(--mono)}
+  .sys .fig div{font-size:11px;color:var(--dim)}
+  .sys .fig b{display:block;font-size:19px;color:var(--ink);font-weight:700}
+
+  /* ---------- kpis ---------- */
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:22px}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:15px 16px}
+  .kpi .l{font-size:12px;color:var(--muted)}
+  .kpi .v{font-family:var(--mono);font-size:28px;font-weight:700;margin-top:4px}
+  .kpi .v.gold{color:var(--gold)}
+
+  .grid2{display:grid;grid-template-columns:1.35fr 1fr;gap:16px;margin-bottom:16px}
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px}
+  .panel h3{margin:0 0 14px;font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px}
+  .panel h3 .t{margin-left:auto;font-size:11px;color:var(--dim);font-family:var(--mono);font-weight:400}
+
+  /* bars */
+  .bars{display:flex;align-items:flex-end;gap:3px;height:110px}
+  .bars .b{flex:1;background:linear-gradient(180deg,var(--gold),var(--gold-d));border-radius:3px 3px 0 0;min-height:2px;position:relative}
+  .bars .b:hover{filter:brightness(1.2)}
+  .bars .b b{position:absolute;top:-17px;left:50%;transform:translateX(-50%);font-size:9px;color:var(--gold);opacity:0;white-space:nowrap;font-family:var(--mono)}
+  .bars .b:hover b{opacity:1}
+  .axis{display:flex;justify-content:space-between;margin-top:6px;font-size:9px;color:var(--dim);font-family:var(--mono)}
+
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--line)}
+  th{color:var(--dim);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px}
+  td.n,th.n{text-align:right;font-family:var(--mono)}
+  tbody tr:hover{background:var(--card2)}
+  .pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;background:var(--bg2);color:var(--muted);font-family:var(--mono)}
+  .pill.app{color:var(--gold);background:rgba(229,180,91,.1)}
+  .empty{color:var(--dim);font-size:13px;padding:18px 4px;text-align:center}
+
+  .feed{max-height:360px;overflow:auto}
+  .feed .r{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--line);font-size:13px;align-items:baseline}
+  .feed .r .d{width:7px;height:7px;border-radius:50%;background:var(--navy);flex:none;align-self:center}
+  .feed .r.action .d{background:var(--gold)}
+  .feed .r.error .d{background:var(--red)}
+  .feed .tm{margin-left:auto;color:var(--dim);font-size:11px;font-family:var(--mono);white-space:nowrap}
+
+  /* settings */
+  .setrow{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:12px}
+  .setrow .h{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+  .setrow .h b{font-size:14px}
+  .code{background:#0b1220;border:1px solid var(--line);border-radius:10px;padding:12px 14px;
+    font-family:var(--mono);font-size:11.5px;color:#cdd8ee;white-space:pre;overflow:auto}
+  .copy{margin-left:auto;font-size:11px;padding:5px 10px}
+  .scrollx{overflow-x:auto}
+  @media(max-width:900px){.kpis{grid-template-columns:repeat(2,1fr)}.grid2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<!-- ============ LOGIN ============ -->
+<div id="auth">
+  <div class="lbox">
+    <div class="brandmark">MASARU · TELEMETRY</div>
+    <h1>ศูนย์ตรวจสอบระบบ</h1>
+    <p>เข้าสู่ระบบด้วยบัญชีแอดมินของ Hub</p>
+    <div class="fld"><label>อีเมล</label><input id="em" type="email" autocomplete="username"></div>
+    <div class="fld"><label>รหัสผ่าน</label><input id="pw" type="password" autocomplete="current-password"></div>
+    <button class="btn" style="width:100%" id="loginBtn">เข้าสู่ระบบ</button>
+    <div class="err" id="authErr"></div>
+  </div>
+</div>
+
+<!-- ============ APP ============ -->
+<div id="app" class="hide">
+  <div class="top">
+    <div class="logo">MASARU<b>·</b>HUB</div>
+    <div class="sp"></div>
+    <div class="meta" id="whoami"></div>
+    <button class="btn g" id="logout" style="padding:7px 12px">ออก</button>
+  </div>
+
+  <div class="wrap">
+    <div class="toolbar">
+      <button class="tabbtn on" data-view="dash">แดชบอร์ด</button>
+      <button class="tabbtn" data-view="set">ตั้งค่า / ติดตั้ง</button>
+      <div class="grow"></div>
+      <select id="range">
+        <option value="1">วันนี้</option>
+        <option value="7" selected>7 วัน</option>
+        <option value="30">30 วัน</option>
+        <option value="90">90 วัน</option>
+      </select>
+      <button class="tabbtn" id="refresh">รีเฟรช</button>
+      <span class="stamp" id="stamp"></span>
+    </div>
+
+    <!-- ===== DASHBOARD VIEW ===== -->
+    <div id="view-dash">
+      <div class="strip" id="strip"></div>
+
+      <div class="kpis">
+        <div class="kpi"><div class="l">ผู้ใช้งาน (active)</div><div class="v gold" id="kUsers">–</div></div>
+        <div class="kpi"><div class="l">เปิดหน้ารวม</div><div class="v" id="kViews">–</div></div>
+        <div class="kpi"><div class="l">เซสชัน</div><div class="v" id="kSess">–</div></div>
+        <div class="kpi"><div class="l">เวลารวม (นาที)</div><div class="v" id="kMins">–</div></div>
+      </div>
+
+      <div class="grid2">
+        <div class="panel">
+          <h3>แนวโน้มรายวัน <span class="t" id="dayScope">ทุกระบบ</span></h3>
+          <div class="bars" id="dayBars"></div>
+          <div class="axis" id="dayAxis"></div>
+        </div>
+        <div class="panel">
+          <h3>ช่วงเวลาที่ใช้งาน <span class="t">เวลาไทย · 0–23 น.</span></h3>
+          <div class="bars" id="hourBars"></div>
+          <div class="axis"><span>0</span><span>6</span><span>12</span><span>18</span><span>23</span></div>
+        </div>
+      </div>
+
+      <div class="grid2">
+        <div class="panel">
+          <h3>ใครใช้ · ใช้บ่อยแค่ไหน <span class="t">เรียงตามการเปิดหน้า</span></h3>
+          <div class="scrollx" id="userWrap"><div class="empty">กำลังโหลด…</div></div>
+        </div>
+        <div class="panel">
+          <h3>หน้า/โมดูลที่ถูกใช้</h3>
+          <div class="scrollx" id="appWrap"><div class="empty">กำลังโหลด…</div></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>กิจกรรมล่าสุด <span class="t">who · what · when</span></h3>
+        <div class="feed" id="feed"><div class="empty">กำลังโหลด…</div></div>
+      </div>
+    </div>
+
+    <!-- ===== SETTINGS VIEW ===== -->
+    <div id="view-set" class="hide">
+      <div class="panel" style="margin-bottom:16px">
+        <h3>วิธีติดตั้งในระบบใหม่</h3>
+        <p style="color:var(--muted);font-size:13px;margin:0 0 8px">
+          วาง 2 สคริปต์นี้ก่อน <code>&lt;/body&gt;</code> ของทุกหน้าในระบบนั้น
+          (คัดลอกสำเร็จรูปได้จากแต่ละระบบด้านล่าง) — ใช้ได้กับทุกเว็บ ไม่ต้องมี supabase-js ในหน้านั้น
+        </p>
+      </div>
+      <div id="setList"><div class="empty">กำลังโหลด…</div></div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const HUB_URL = 'https://rmunaewdmlnsiwogmozq.supabase.co';   // masaru-champ
+const HUB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJtdW5hZXdkbWxuc2l3b2dtb3pxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI3MTg5NDUsImV4cCI6MjA5ODI5NDk0NX0.sNYPKfXf0rNt9JgmyRGH7yY4C1NLpmYngHcswEsXHNA';
+const sb = supabase.createClient(HUB_URL, HUB_KEY);
+const $ = id => document.getElementById(id);
+let SYSTEMS = [];        // จาก hub_systems()
+let filterSystem = null; // null = ทุกระบบ
+
+// ---------- auth ----------
+$('loginBtn').onclick = async () => {
+  $('authErr').textContent='';
+  const email=$('em').value.trim(), password=$('pw').value;
+  if(!email||!password){ $('authErr').textContent='กรอกอีเมลและรหัสผ่าน'; return; }
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  if(error){ $('authErr').textContent='เข้าสู่ระบบไม่สำเร็จ'; return; }
+  boot();
+};
+$('pw').addEventListener('keydown', e=>{ if(e.key==='Enter') $('loginBtn').click(); });
+$('logout').onclick = async ()=>{ await sb.auth.signOut(); location.reload(); };
+
+async function boot(){
+  const { data:{session} } = await sb.auth.getSession();
+  if(!session){ show('auth'); return; }
+  show('app');
+  $('whoami').textContent = session.user.email || 'admin';
+  await loadSystems();
+  await loadAll();
+}
+function show(v){ $('auth').classList.toggle('hide', v!=='auth'); $('app').classList.toggle('hide', v!=='app'); }
+
+// ---------- tabs ----------
+document.querySelectorAll('.tabbtn[data-view]').forEach(b=>{
+  b.onclick=()=>{
+    document.querySelectorAll('.tabbtn[data-view]').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on');
+    const v=b.dataset.view;
+    $('view-dash').classList.toggle('hide', v!=='dash');
+    $('view-set').classList.toggle('hide', v!=='set');
+    if(v==='set') renderSettings();
+  };
+});
+$('refresh').onclick=loadAll;
+$('range').onchange=loadAll;
+
+// ---------- range ----------
+function bounds(){
+  const days=+$('range').value, to=new Date(), from=new Date();
+  if(days===1) from.setHours(0,0,0,0); else from.setDate(from.getDate()-days);
+  return { from:from.toISOString(), to:to.toISOString() };
+}
+
+async function loadSystems(){
+  const { data, error } = await sb.rpc('hub_systems');
+  SYSTEMS = (!error && data) ? data : [];
+}
+
+async function loadAll(){
+  const { from, to } = bounds();
+  const p = filterSystem;
+  try{
+    const [sys,user,app,hour,day,feed] = await Promise.all([
+      sb.rpc('hub_by_system',{p_from:from,p_to:to}),
+      sb.rpc('hub_by_user',{p_from:from,p_to:to,p_system:p}),
+      sb.rpc('hub_by_app',{p_from:from,p_to:to,p_system:p}),
+      sb.rpc('hub_by_hour',{p_from:from,p_to:to,p_system:p}),
+      sb.rpc('hub_by_day',{p_from:from,p_to:to,p_system:p}),
+      sb.rpc('hub_feed',{p_limit:60,p_system:p})
+    ]);
+    if(sys.error) throw sys.error;
+    renderStrip(sys.data||[]);
+    renderKPI(user.data||[]);
+    renderUsers(user.data||[]);
+    renderApps(app.data||[]);
+    renderHours(hour.data||[]);
+    renderDays(day.data||[]);
+    renderFeed(feed.data||[]);
+    $('stamp').textContent='อัปเดต '+new Date().toLocaleTimeString('th-TH');
+  }catch(e){
+    $('userWrap').innerHTML='<div class="empty">บัญชีนี้ไม่มีสิทธิ์ดูรายงาน (เฉพาะแอดมิน Hub)</div>';
+    ['appWrap','feed'].forEach(x=>$(x).innerHTML=''); $('strip').innerHTML='';
+    console.error(e);
+  }
+}
+
+// ---------- render ----------
+function fresh(ts){ // active ภายใน 5 นาที = live
+  if(!ts) return false; return (Date.now()-new Date(ts).getTime()) < 5*60*1000;
+}
+function renderStrip(rows){
+  const map={}; rows.forEach(r=>map[r.system]=r);
+  const list = SYSTEMS.length ? SYSTEMS.map(s=>Object.assign({system:s.code,name:s.name,color:s.color},map[s.code]||{}))
+                              : rows;
+  $('strip').innerHTML = list.map(r=>{
+    const live=fresh(r.last_seen), col=r.color||'#3A5A8C', sel=(filterSystem===r.system);
+    return `<div class="sys ${sel?'sel':''}" data-sys="${esc(r.system)}">
+      <div class="bar" style="background:${esc(col)}"></div>
+      <div class="nm">${esc(r.name||r.system)}</div>
+      <div class="st"><span class="dot ${live?'live':''}"></span>${live?'กำลังใช้งาน':(r.last_seen?('ล่าสุด '+fmt(r.last_seen)):'ยังไม่มีข้อมูล')}</div>
+      <div class="fig">
+        <div>ผู้ใช้<b>${num(r.users)}</b></div>
+        <div>เปิดหน้า<b>${num(r.page_views)}</b></div>
+        <div>นาที<b>${Math.round(+r.minutes||0)}</b></div>
+      </div>
+    </div>`;
+  }).join('') || '<div class="empty">ยังไม่มีระบบลงทะเบียน</div>';
+  document.querySelectorAll('.sys').forEach(el=>{
+    el.onclick=()=>{ const s=el.dataset.sys; filterSystem=(filterSystem===s)?null:s;
+      $('dayScope').textContent=filterSystem?('ระบบ: '+(SYSTEMS.find(x=>x.code===s)?.name||s)):'ทุกระบบ';
+      loadAll(); };
+  });
+}
+function renderKPI(rows){
+  const v=rows.reduce((s,r)=>s+ +r.page_views||0,0);
+  $('kUsers').textContent=num(rows.length);
+  $('kViews').textContent=num(v);
+  $('kSess').textContent=num(rows.reduce((s,r)=>s+ +r.sessions||0,0));
+  $('kMins').textContent=num(Math.round(rows.reduce((s,r)=>s+ +r.minutes||0,0)));
+}
+function renderUsers(rows){
+  if(!rows.length){ $('userWrap').innerHTML='<div class="empty">ยังไม่มีข้อมูลในช่วงนี้</div>'; return; }
+  let h='<table><thead><tr><th>ผู้ใช้</th><th>ฝ่าย</th><th class="n">ระบบ</th><th class="n">เปิด</th><th class="n">นาที</th><th>ใช้บ่อยสุด</th><th>ล่าสุด</th></tr></thead><tbody>';
+  rows.forEach(r=>{ h+=`<tr>
+    <td>${esc(r.email||'ไม่ระบุตัว')}</td>
+    <td><span class="pill">${esc(r.role||'—')}</span></td>
+    <td class="n">${num(r.systems)}</td>
+    <td class="n">${num(r.page_views)}</td>
+    <td class="n">${Math.round(+r.minutes||0)}</td>
+    <td>${r.top_app?`<span class="pill app">${esc(r.top_app)}</span>`:'—'}</td>
+    <td class="stamp">${fmt(r.last_seen)}</td></tr>`; });
+  $('userWrap').innerHTML=h+'</tbody></table>';
+}
+function renderApps(rows){
+  if(!rows.length){ $('appWrap').innerHTML='<div class="empty">—</div>'; return; }
+  let h='<table><thead><tr><th>ระบบ</th><th>หน้า</th><th class="n">ผู้ใช้</th><th class="n">เปิด</th></tr></thead><tbody>';
+  rows.forEach(r=>{ h+=`<tr><td><span class="pill">${esc(r.system)}</span></td>
+    <td><span class="pill app">${esc(r.app||'—')}</span></td>
+    <td class="n">${num(r.users)}</td><td class="n">${num(r.page_views)}</td></tr>`; });
+  $('appWrap').innerHTML=h+'</tbody></table>';
+}
+function renderHours(rows){
+  const m={}; rows.forEach(r=>m[+r.hour]=+r.page_views||0);
+  const mx=Math.max(1,...Object.values(m)); let h='';
+  for(let i=0;i<24;i++){ const v=m[i]||0; h+=`<div class="b" style="height:${Math.max(v/mx*100,2)}%"><b>${i}:00·${v}</b></div>`; }
+  $('hourBars').innerHTML=h;
+}
+function renderDays(rows){
+  if(!rows.length){ $('dayBars').innerHTML=''; $('dayAxis').innerHTML=''; return; }
+  const mx=Math.max(1,...rows.map(r=>+r.page_views||0));
+  $('dayBars').innerHTML=rows.map(r=>`<div class="b" style="height:${Math.max((+r.page_views||0)/mx*100,2)}%"><b>${fmtDay(r.day)}·${num(r.page_views)}</b></div>`).join('');
+  const f=rows[0].day, l=rows[rows.length-1].day;
+  $('dayAxis').innerHTML=`<span>${fmtDay(f)}</span><span>${fmtDay(l)}</span>`;
+}
+function renderFeed(rows){
+  if(!rows.length){ $('feed').innerHTML='<div class="empty">—</div>'; return; }
+  $('feed').innerHTML=rows.map(r=>{
+    let what;
+    if(r.event==='page_view') what=`เปิด <span class="pill app">${esc(r.app)}</span>`;
+    else if(r.event==='action') what=`<b style="color:var(--gold)">${esc((r.detail&&r.detail.action)||'action')}</b> ที่ <span class="pill app">${esc(r.app)}</span>`;
+    else if(r.event==='error') what=`<b style="color:var(--red)">error</b> ${esc((r.detail&&r.detail.msg)||'')}`;
+    else if(r.event==='exit') what=`ออกจาก <span class="pill app">${esc(r.app)}</span>`;
+    else return '';
+    return `<div class="r ${r.event}"><span class="d"></span>
+      <div><span class="pill">${esc(r.system)}</span> <b>${esc(r.email||'ไม่ระบุ')}</b> · ${what}</div>
+      <div class="tm">${fmt(r.ts)}</div></div>`;
+  }).join('');
+}
+
+// ---------- settings ----------
+function renderSettings(){
+  if(!SYSTEMS.length){ $('setList').innerHTML='<div class="empty">ยังไม่มีระบบ (เพิ่มใน SQL ตาราง systems)</div>'; return; }
+  $('setList').innerHTML=SYSTEMS.map(s=>{
+    const snippet =
+`<script>
+  window.MASARU_TRACK = {
+    hub:    '${HUB_URL}',
+    anon:   '${HUB_KEY}',
+    system: '${s.code}',
+    key:    '${s.write_key}'
+  };
+<\/script>
+<script src="masaru-track.js"><\/script>`;
+    return `<div class="setrow">
+      <div class="h"><span class="dot" style="background:${esc(s.color)}"></span>
+        <b>${esc(s.name)}</b><span class="pill">${esc(s.code)}</span>
+        <button class="btn g copy" data-c="${encodeURIComponent(snippet)}">คัดลอกโค้ด</button></div>
+      <div class="code">${esc(snippet)}</div>
+    </div>`;
+  }).join('');
+  document.querySelectorAll('.copy').forEach(b=>{
+    b.onclick=()=>{ navigator.clipboard.writeText(decodeURIComponent(b.dataset.c));
+      const t=b.textContent; b.textContent='คัดลอกแล้ว ✓'; setTimeout(()=>b.textContent=t,1500); };
+  });
+}
+
+// ---------- utils ----------
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+function num(n){ return (Number(n)||0).toLocaleString('th-TH'); }
+function fmt(ts){ if(!ts) return '—'; return new Date(ts).toLocaleString('th-TH',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}); }
+function fmtDay(d){ if(!d) return ''; return new Date(d).toLocaleDateString('th-TH',{day:'2-digit',month:'short'}); }
+
+boot();
+</script>
+</body>
+</html>

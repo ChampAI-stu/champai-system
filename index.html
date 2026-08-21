@@ -108,6 +108,22 @@
   .pill.app{color:var(--gold);background:rgba(229,180,91,.1)}
   .empty{color:var(--dim);font-size:13px;padding:18px 4px;text-align:center}
 
+  /* live panel */
+  .live-panel{border-color:rgba(56,211,159,.35);background:
+    linear-gradient(180deg,rgba(56,211,159,.07),transparent 60%),var(--card)}
+  .livecount{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--live);
+    background:rgba(56,211,159,.12);border-radius:999px;padding:2px 10px}
+  .on-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px}
+  .on{background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:11px 13px;
+    display:flex;gap:10px;align-items:flex-start;animation:fadein .3s ease}
+  @keyframes fadein{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+  .on .av{width:32px;height:32px;border-radius:9px;background:var(--card2);display:grid;place-items:center;
+    font-family:var(--mono);font-weight:700;font-size:13px;color:var(--gold);flex:none}
+  .on .who{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .on .at{font-size:11px;color:var(--muted);margin-top:3px;display:flex;gap:5px;align-items:center;flex-wrap:wrap}
+  .on .ago{font-family:var(--mono);font-size:10px;color:var(--live);margin-top:4px}
+  .on .body{min-width:0;flex:1}
+
   .feed{max-height:360px;overflow:auto}
   .feed .r{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--line);font-size:13px;align-items:baseline}
   .feed .r .d{width:7px;height:7px;border-radius:50%;background:var(--navy);flex:none;align-self:center}
@@ -167,6 +183,18 @@
 
     <!-- ===== DASHBOARD VIEW ===== -->
     <div id="view-dash">
+
+      <!-- ออนไลน์ตอนนี้ (สด) -->
+      <div class="panel live-panel" style="margin-bottom:20px">
+        <h3>
+          <span class="dot live"></span>
+          ออนไลน์ตอนนี้
+          <span class="livecount" id="liveCount">0</span>
+          <span class="t" id="livePulse">รอสัญญาณ…</span>
+        </h3>
+        <div id="onlineWrap"><div class="empty">ยังไม่มีใครกำลังใช้งาน</div></div>
+      </div>
+
       <div class="strip" id="strip"></div>
 
       <div class="kpis">
@@ -248,6 +276,7 @@ async function boot(){
   $('whoami').textContent = session.user.email || 'admin';
   await loadSystems();
   await loadAll();
+  startLive();
 }
 function show(v){ $('auth').classList.toggle('hide', v!=='auth'); $('app').classList.toggle('hide', v!=='app'); }
 
@@ -305,9 +334,63 @@ async function loadAll(){
   }
 }
 
+// ================= LIVE =================
+let liveTimer=null, rtChannel=null, lastPush=0;
+
+async function loadLive(){
+  try{
+    const [on,pulse] = await Promise.all([ sb.rpc('hub_online'), sb.rpc('hub_pulse') ]);
+    if(on.error) return;
+    renderOnline(on.data||[]);
+    const p=(pulse.data&&pulse.data[0])||{};
+    $('liveCount').textContent = num(p.online_users||0);
+    $('livePulse').textContent =
+      `${num(p.online_sessions||0)} เซสชัน · ${num(p.systems_live||0)} ระบบ · ${num(p.events_last_min||0)} events/นาที`;
+  }catch(e){}
+}
+
+function renderOnline(rows){
+  if(!rows.length){ $('onlineWrap').innerHTML='<div class="empty">ยังไม่มีใครกำลังใช้งาน</div>'; return; }
+  $('onlineWrap').innerHTML='<div class="on-grid">'+rows.map(r=>{
+    const who=r.email||'ไม่ระบุตัว';
+    const ini=(who[0]||'?').toUpperCase();
+    const dev=r.device==='mobile'?'มือถือ':(r.device==='tablet'?'แท็บเล็ต':'คอม');
+    return `<div class="on">
+      <div class="av">${esc(ini)}</div>
+      <div class="body">
+        <div class="who">${esc(who)}</div>
+        <div class="at"><span class="pill">${esc(r.system_name||r.system)}</span>
+          <span class="pill app">${esc(r.app||'—')}</span></div>
+        <div class="ago">● อยู่หน้านี้ ${Math.round(+r.on_page_minutes||0)} นาที · ${dev} · เห็นล่าสุด ${r.seconds_ago}s</div>
+      </div></div>`;
+  }).join('')+'</div>';
+}
+
+function startLive(){
+  stopLive();
+  loadLive();
+  liveTimer = setInterval(loadLive, 5000);          // เช็กทุก 5 วิ
+  // Realtime: มี event ใหม่เข้ามา → อัปเดตทันที (หน่วงกันถี่เกิน 1.2 วิ)
+  rtChannel = sb.channel('hub-live')
+    .on('postgres_changes', { event:'INSERT', schema:'public', table:'events' }, () => {
+      const now=Date.now();
+      if(now-lastPush < 1200) return;
+      lastPush=now; loadLive();
+    })
+    .subscribe();
+}
+function stopLive(){
+  if(liveTimer){ clearInterval(liveTimer); liveTimer=null; }
+  if(rtChannel){ sb.removeChannel(rtChannel); rtChannel=null; }
+}
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden) stopLive();
+  else if(!$('app').classList.contains('hide')) startLive();
+});
+
 // ---------- render ----------
-function fresh(ts){ // active ภายใน 5 นาที = live
-  if(!ts) return false; return (Date.now()-new Date(ts).getTime()) < 5*60*1000;
+function fresh(ts){ // active ภายใน 90 วิ = live
+  if(!ts) return false; return (Date.now()-new Date(ts).getTime()) < 90*1000;
 }
 function renderStrip(rows){
   const map={}; rows.forEach(r=>map[r.system]=r);
